@@ -3,7 +3,7 @@ const Redis = require('ioredis');
 let redisClient;
 
 const connectRedis = () => {
-  redisClient = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  redisClient = new Redis(process.env.REDIS_URL, {
     retryStrategy: (times) => {
       if (times > 3) return null;
       return Math.min(times * 200, 2000);
