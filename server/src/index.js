@@ -1,5 +1,4 @@
-require('dotenv').config({ path: './.env' });
-
+require('dotenv').config({ path: require('path').resolve(process.cwd(), '.env') });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -12,6 +11,7 @@ const authRoutes = require('./routes/authRoutes');
 const urlRoutes = require('./routes/urlRoutes');
 const { redirectUrl } = require('./controllers/urlController');
 const errorHandler = require('./middleware/errorHandler');
+const { apiLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
@@ -26,6 +26,9 @@ app.use(morgan('dev'));
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000' }));
 app.use(express.json());
 
+// Apply rate limiting to all API routes
+app.use('/api', apiLimiter);
+
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
 
@@ -33,9 +36,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() 
 app.use('/api/auth', authRoutes);
 app.use('/api/urls', urlRoutes);
 
-// *** THE REDIRECT ROUTE ***
-// This must come AFTER api routes
-// When someone visits /:shortCode it redirects to the original URL
+// Redirect route — must come after API routes
 app.get('/:shortCode', redirectUrl);
 
 // Error handler (must be last)

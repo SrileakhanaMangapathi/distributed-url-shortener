@@ -1,8 +1,8 @@
 const Url = require('../models/Url');
 const { generateShortCode, isValidUrl } = require('../services/shortCodeService');
+const { cacheGet, cacheSet, cacheDelete, urlCacheKey } = require('../services/cacheService');
 
 // ─── POST /api/urls/shorten ───────────────────────────────────────────────────
-// Shorten a long URL → returns a short code
 exports.shortenUrl = async (req, res, next) => {
   try {
     const { originalUrl, customAlias, expiresIn } = req.body;
@@ -15,7 +15,7 @@ exports.shortenUrl = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid URL format. Must start with http:// or https://' });
     }
 
-    // 2. Handle custom alias if provided
+    // 2. Handle custom alias or generate short code
     let shortCode = customAlias || generateShortCode();
 
     // 3. Check if custom alias is already taken
@@ -25,22 +25,18 @@ exports.shortenUrl = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'Custom alias already taken. Try another.' });
       }
     } else {
-      // Make sure randomly generated code is unique (very rare collision)
+      // Ensure uniqueness
       let isUnique = false;
       while (!isUnique) {
         const existing = await Url.findOne({ shortCode });
-        if (!existing) {
-          isUnique = true;
-        } else {
-          shortCode = generateShortCode(); // try again
-        }
+        if (!existing) isUnique = true;
+        else shortCode = generateShortCode();
       }
     }
 
     // 4. Calculate expiry date if provided
     let expiresAt = null;
     if (expiresIn) {
-      // expiresIn is in hours e.g. 24 = expires in 24 hours
       expiresAt = new Date(Date.now() + expiresIn * 60 * 60 * 1000);
     }
 
@@ -50,22 +46,21 @@ exports.shortenUrl = async (req, res, next) => {
       shortCode,
       customAlias: customAlias || null,
       expiresAt,
-      // If user is logged in, attach their ID
       createdBy: req.user ? req.user._id : null,
     });
 
-    // 6. Build the full short URL
+    // 6. Cache the new URL immediately so first redirect is fast too
+    await cacheSet(urlCacheKey(shortCode), {
+      originalUrl,
+      expiresAt,
+      isActive: true,
+    });
+
     const shortUrl = `${process.env.BASE_URL}/${shortCode}`;
 
     res.status(201).json({
       success: true,
-      data: {
-        shortUrl,
-        shortCode,
-        originalUrl,
-        expiresAt,
-        createdAt: url.createdAt,
-      },
+      data: { shortUrl, shortCode, originalUrl, expiresAt, createdAt: url.createdAt },
     });
   } catch (err) {
     next(err);
@@ -73,31 +68,58 @@ exports.shortenUrl = async (req, res, next) => {
 };
 
 // ─── GET /:shortCode ──────────────────────────────────────────────────────────
-// Redirect short URL → original URL
-// This is the most frequently called endpoint — keep it fast!
+// This is the HOT PATH — called every time someone clicks a short link
+// Cache-aside pattern:
+//   1. Check Redis first (fast ~3ms)
+//   2. If miss, check MongoDB (~80ms)
+//   3. Store result in Redis for next time
 exports.redirectUrl = async (req, res, next) => {
   try {
     const { shortCode } = req.params;
+    const cacheKey = urlCacheKey(shortCode);
 
-    // 1. Look up in MongoDB
-    const url = await Url.findOne({ shortCode, isActive: true });
+    // ── STEP 1: Check Redis cache ──────────────────────────────────────────
+    const cached = await cacheGet(cacheKey);
 
-    // 2. Not found
-    if (!url) {
-      return res.status(404).json({ success: false, message: 'Short URL not found or has been deleted' });
+    if (cached) {
+      // CACHE HIT ⚡ — serve from Redis in ~3ms
+      console.log(`Cache HIT for ${shortCode}`);
+
+      // Check expiry
+      if (cached.expiresAt && new Date(cached.expiresAt) < new Date()) {
+        await cacheDelete(cacheKey);
+        return res.status(410).json({ success: false, message: 'This link has expired' });
+      }
+
+      // Increment click count async (don't await — keep redirect fast!)
+      Url.findOneAndUpdate({ shortCode }, { $inc: { clicks: 1 } }).exec();
+
+      return res.redirect(302, cached.originalUrl);
     }
 
-    // 3. Check if expired
+    // ── STEP 2: Cache MISS — check MongoDB ────────────────────────────────
+    console.log(`Cache MISS for ${shortCode} — querying MongoDB`);
+    const url = await Url.findOne({ shortCode, isActive: true });
+
+    if (!url) {
+      return res.status(404).json({ success: false, message: 'Short URL not found' });
+    }
+
+    // Check expiry
     if (url.expiresAt && url.expiresAt < new Date()) {
       return res.status(410).json({ success: false, message: 'This link has expired' });
     }
 
-    // 4. Increment click count (async — don't wait for it)
-    // We use $inc so it's atomic — safe even with multiple servers
+    // ── STEP 3: Store in Redis for next time ──────────────────────────────
+    await cacheSet(cacheKey, {
+      originalUrl: url.originalUrl,
+      expiresAt: url.expiresAt,
+      isActive: url.isActive,
+    });
+
+    // Increment click count async
     Url.findByIdAndUpdate(url._id, { $inc: { clicks: 1 } }).exec();
 
-    // 5. Redirect to original URL
-    // 302 = temporary redirect (not cached by browser — important for analytics!)
     return res.redirect(302, url.originalUrl);
   } catch (err) {
     next(err);
@@ -105,12 +127,11 @@ exports.redirectUrl = async (req, res, next) => {
 };
 
 // ─── GET /api/urls ────────────────────────────────────────────────────────────
-// Get all URLs created by the logged-in user
 exports.getUserUrls = async (req, res, next) => {
   try {
     const urls = await Url.find({ createdBy: req.user._id })
-      .sort({ createdAt: -1 }) // newest first
-      .select('-__v');          // exclude MongoDB version field
+      .sort({ createdAt: -1 })
+      .select('-__v');
 
     res.status(200).json({
       success: true,
@@ -131,7 +152,6 @@ exports.getUserUrls = async (req, res, next) => {
 };
 
 // ─── DELETE /api/urls/:id ─────────────────────────────────────────────────────
-// Delete a URL (only the creator can delete it)
 exports.deleteUrl = async (req, res, next) => {
   try {
     const url = await Url.findById(req.params.id);
@@ -140,10 +160,12 @@ exports.deleteUrl = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'URL not found' });
     }
 
-    // Make sure only the creator can delete
     if (url.createdBy?.toString() !== req.user._id.toString()) {
       return res.status(403).json({ success: false, message: 'Not authorized to delete this URL' });
     }
+
+    // Delete from cache too — important!
+    await cacheDelete(urlCacheKey(url.shortCode));
 
     await url.deleteOne();
 
@@ -154,7 +176,6 @@ exports.deleteUrl = async (req, res, next) => {
 };
 
 // ─── GET /api/urls/:shortCode ─────────────────────────────────────────────────
-// Get info about a specific short URL (no redirect)
 exports.getUrlInfo = async (req, res, next) => {
   try {
     const url = await Url.findOne({ shortCode: req.params.shortCode });

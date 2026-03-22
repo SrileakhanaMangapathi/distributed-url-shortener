@@ -7,13 +7,14 @@ const {
   getUrlInfo,
 } = require('../controllers/urlController');
 const protect = require('../middleware/auth');
+const { shortenLimiter } = require('../middleware/rateLimiter');
 
-// Public routes (no login needed)
-router.post('/shorten', shortenUrl);           // POST /api/urls/shorten
+// Public routes
+router.post('/shorten', shortenLimiter, shortenUrl);  // POST /api/urls/shorten
 
-// Protected routes (login required)
-router.get('/', protect, getUserUrls);          // GET  /api/urls
-router.delete('/:id', protect, deleteUrl);      // DELETE /api/urls/:id
-router.get('/:shortCode', getUrlInfo);          // GET  /api/urls/:shortCode
+// Protected routes
+router.get('/', protect, getUserUrls);                // GET  /api/urls
+router.delete('/:id', protect, deleteUrl);            // DELETE /api/urls/:id
+router.get('/:shortCode', getUrlInfo);                // GET  /api/urls/:shortCode
 
 module.exports = router;
