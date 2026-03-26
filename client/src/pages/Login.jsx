@@ -28,7 +28,7 @@ const Login = () => {
     borderRadius: '8px',
     color: '#fff',
     fontSize: '0.95rem',
-    fontFamily: "'Courier New', monospace",
+    fontFamily: "'Palatino Linotype', 'Book Antiqua', Georgia, serif",
     outline: 'none',
     boxSizing: 'border-box',
   };
@@ -42,7 +42,7 @@ const Login = () => {
         alignItems: 'center',
         justifyContent: 'center',
         padding: '2rem',
-        fontFamily: "'Courier New', monospace",
+        fontFamily: "'Palatino Linotype', 'Book Antiqua', Georgia, serif",
       }}
     >
       <div
@@ -118,7 +118,7 @@ const Login = () => {
               fontWeight: 700,
               fontSize: '0.95rem',
               cursor: loading ? 'not-allowed' : 'pointer',
-              fontFamily: "'Courier New', monospace",
+              fontFamily: "'Palatino Linotype', 'Book Antiqua', Georgia, serif",
               marginTop: '0.5rem',
             }}
           >
