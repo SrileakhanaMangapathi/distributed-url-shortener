@@ -1,5 +1,8 @@
 const rateLimit = require('express-rate-limit');
 
+const isTest = process.env.NODE_ENV === 'test';
+const skipInTest = () => isTest;
+
 /**
  * Basic rate limiter using express-rate-limit
  * 
@@ -15,6 +18,7 @@ const rateLimit = require('express-rate-limit');
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,    // 1 minute window
   max: 100,               // max 100 requests per window
+  skip: skipInTest,
   standardHeaders: true,  // Return rate limit info in headers
   legacyHeaders: false,
   message: {
@@ -28,6 +32,7 @@ const apiLimiter = rateLimit({
 const shortenLimiter = rateLimit({
   windowMs: 60 * 1000,   // 1 minute window
   max: 10,               // max 10 shortens per minute
+  skip: skipInTest,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -41,6 +46,7 @@ const shortenLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 minute window
   max: 5,                     // max 5 attempts
+  skip: skipInTest,
   standardHeaders: true,
   legacyHeaders: false,
   message: {

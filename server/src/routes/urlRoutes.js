@@ -7,10 +7,11 @@ const {
   getUrlInfo,
 } = require('../controllers/urlController');
 const protect = require('../middleware/auth');
+const { optionalProtect } = require('../middleware/auth');
 const { shortenLimiter } = require('../middleware/rateLimiter');
 
 // Public routes
-router.post('/shorten', shortenLimiter, shortenUrl);  // POST /api/urls/shorten
+router.post('/shorten', optionalProtect, shortenLimiter, shortenUrl);  // POST /api/urls/shorten
 
 // Protected routes
 router.get('/', protect, getUserUrls);                // GET  /api/urls

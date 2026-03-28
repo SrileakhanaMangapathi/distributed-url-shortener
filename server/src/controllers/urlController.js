@@ -3,7 +3,8 @@ const { generateShortCode, isValidUrl } = require('../services/shortCodeService'
 const { cacheGet, cacheSet, cacheDelete, urlCacheKey } = require('../services/cacheService');
 const { trackClick } = require('../services/analyticsService');
 
-// ─── POST /api/urls/shorten ───────────────────────────────────────────────────
+const isTest = process.env.NODE_ENV === 'test';
+
 exports.shortenUrl = async (req, res, next) => {
   try {
     const { originalUrl, customAlias, expiresIn } = req.body;
@@ -44,7 +45,6 @@ exports.shortenUrl = async (req, res, next) => {
       createdBy: req.user ? req.user._id : null,
     });
 
-    // Cache immediately
     await cacheSet(urlCacheKey(shortCode), {
       originalUrl,
       expiresAt,
@@ -63,36 +63,35 @@ exports.shortenUrl = async (req, res, next) => {
   }
 };
 
-// ─── GET /:shortCode ──────────────────────────────────────────────────────────
 exports.redirectUrl = async (req, res, next) => {
   try {
     const { shortCode } = req.params;
     const cacheKey = urlCacheKey(shortCode);
-
-    // Check Redis cache first
     const cached = await cacheGet(cacheKey);
 
     if (cached) {
-      console.log(`Cache HIT for ${shortCode}`);
+      if (!isTest) {
+        console.log(`Cache HIT for ${shortCode}`);
+      }
 
       if (cached.expiresAt && new Date(cached.expiresAt) < new Date()) {
         await cacheDelete(cacheKey);
         return res.status(410).json({ success: false, message: 'This link has expired' });
       }
 
-      // Track click ASYNC — don't wait, keep redirect fast!
       if (cached.urlId) {
         trackClick({ shortCode, urlId: cached.urlId, req });
       }
 
-      // Increment click count async
       Url.findOneAndUpdate({ shortCode }, { $inc: { clicks: 1 } }).exec();
 
       return res.redirect(302, cached.originalUrl);
     }
 
-    // Cache miss — query MongoDB
-    console.log(`Cache MISS for ${shortCode} — querying MongoDB`);
+    if (!isTest) {
+      console.log(`Cache MISS for ${shortCode} - querying MongoDB`);
+    }
+
     const url = await Url.findOne({ shortCode, isActive: true });
 
     if (!url) {
@@ -103,7 +102,6 @@ exports.redirectUrl = async (req, res, next) => {
       return res.status(410).json({ success: false, message: 'This link has expired' });
     }
 
-    // Cache for next time — include urlId for analytics
     await cacheSet(cacheKey, {
       originalUrl: url.originalUrl,
       expiresAt: url.expiresAt,
@@ -111,10 +109,7 @@ exports.redirectUrl = async (req, res, next) => {
       urlId: url._id.toString(),
     });
 
-    // Track click ASYNC
     trackClick({ shortCode, urlId: url._id, req });
-
-    // Increment click count async
     Url.findByIdAndUpdate(url._id, { $inc: { clicks: 1 } }).exec();
 
     return res.redirect(302, url.originalUrl);
@@ -123,7 +118,6 @@ exports.redirectUrl = async (req, res, next) => {
   }
 };
 
-// ─── GET /api/urls ────────────────────────────────────────────────────────────
 exports.getUserUrls = async (req, res, next) => {
   try {
     const urls = await Url.find({ createdBy: req.user._id })
@@ -148,7 +142,6 @@ exports.getUserUrls = async (req, res, next) => {
   }
 };
 
-// ─── DELETE /api/urls/:id ─────────────────────────────────────────────────────
 exports.deleteUrl = async (req, res, next) => {
   try {
     const url = await Url.findById(req.params.id);
@@ -170,7 +163,6 @@ exports.deleteUrl = async (req, res, next) => {
   }
 };
 
-// ─── GET /api/urls/:shortCode ─────────────────────────────────────────────────
 exports.getUrlInfo = async (req, res, next) => {
   try {
     const url = await Url.findOne({ shortCode: req.params.shortCode });
