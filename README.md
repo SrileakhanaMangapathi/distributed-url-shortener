@@ -10,8 +10,7 @@ A full-stack URL shortening platform built with React, Node.js, Express, MongoDB
 
 ## Live Demo
 
-- Frontend: [https://distributed-url-shortener-kappa.vercel.app](https://distributed-url-shortener-kappa.vercel.app)
-- Backend: [https://distributed-url-shortener-dc4x.onrender.com](https://distributed-url-shortener-dc4x.onrender.com)
+- Website: [https://distributed-url-shortener-kappa.vercel.app](https://distributed-url-shortener-kappa.vercel.app)
 
 ## Overview
 
